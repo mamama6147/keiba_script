@@ -156,49 +156,15 @@ echo "使用するスクリプト:"
 echo "- レーススクレイパー: $RACE_SCRAPER"
 echo "- 馬情報スクレイパー: $HORSE_SCRAPER"
 
-# 各四半期ごとにデータを収集
-# 第1四半期: 1-3月
-echo "[TASK 1] ${TARGET_YEAR}年第1四半期(1-3月)のレースデータを収集 (開始: $(date))"
-python $RACE_SCRAPER --year $TARGET_YEAR --months 1 2 3 --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --max_races $MAX_RACES > scraping_logs/Q1_races_${TIMESTAMP}.log 2>&1
+# 一括でその年のすべてのレースデータを収集
+echo "[TASK 1] ${TARGET_YEAR}年のレースデータを収集 (開始: $(date))"
+python $RACE_SCRAPER --year $TARGET_YEAR --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --max_races $MAX_RACES > scraping_logs/races_${TIMESTAMP}.log 2>&1
 
 # 中間ファイルのクリーンアップ
 cleanup_intermediate_files "intermediate_races_*" $KEEP_INTERMEDIATE "$OUTPUT_DIR"
 cleanup_intermediate_files "intermediate_race_infos_*" $KEEP_INTERMEDIATE "$OUTPUT_DIR"
 
-echo "第1四半期データ収集完了 - 30分休止します ($(date))"
-sleep 1800  # 30分休止
-
-# 第2四半期: 4-6月
-echo "[TASK 2] ${TARGET_YEAR}年第2四半期(4-6月)のレースデータを収集 (開始: $(date))"
-python $RACE_SCRAPER --year $TARGET_YEAR --months 4 5 6 --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --max_races $MAX_RACES > scraping_logs/Q2_races_${TIMESTAMP}.log 2>&1
-
-# 中間ファイルのクリーンアップ
-cleanup_intermediate_files "intermediate_races_*" $KEEP_INTERMEDIATE "$OUTPUT_DIR"
-cleanup_intermediate_files "intermediate_race_infos_*" $KEEP_INTERMEDIATE "$OUTPUT_DIR"
-
-echo "第2四半期データ収集完了 - 30分休止します ($(date))"
-sleep 1800  # 30分休止
-
-# 第3四半期: 7-9月
-echo "[TASK 3] ${TARGET_YEAR}年第3四半期(7-9月)のレースデータを収集 (開始: $(date))"
-python $RACE_SCRAPER --year $TARGET_YEAR --months 7 8 9 --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --max_races $MAX_RACES > scraping_logs/Q3_races_${TIMESTAMP}.log 2>&1
-
-# 中間ファイルのクリーンアップ
-cleanup_intermediate_files "intermediate_races_*" $KEEP_INTERMEDIATE "$OUTPUT_DIR"
-cleanup_intermediate_files "intermediate_race_infos_*" $KEEP_INTERMEDIATE "$OUTPUT_DIR"
-
-echo "第3四半期データ収集完了 - 30分休止します ($(date))"
-sleep 1800  # 30分休止
-
-# 第4四半期: 10-12月
-echo "[TASK 4] ${TARGET_YEAR}年第4四半期(10-12月)のレースデータを収集 (開始: $(date))"
-python $RACE_SCRAPER --year $TARGET_YEAR --months 10 11 12 --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --max_races $MAX_RACES > scraping_logs/Q4_races_${TIMESTAMP}.log 2>&1
-
-# 中間ファイルのクリーンアップ
-cleanup_intermediate_files "intermediate_races_*" $KEEP_INTERMEDIATE "$OUTPUT_DIR"
-cleanup_intermediate_files "intermediate_race_infos_*" $KEEP_INTERMEDIATE "$OUTPUT_DIR"
-
-echo "第4四半期データ収集完了 - 30分休止します ($(date))"
+echo "レースデータ収集完了 - 30分休止します ($(date))"
 sleep 1800  # 30分休止
 
 # 最新の馬IDファイルを取得
@@ -208,45 +174,24 @@ LATEST_HORSE_IDS=$(ls -t keiba_data/horse_ids_*.json 2>/dev/null | head -1)
 if [ -z "$LATEST_HORSE_IDS" ]; then
     echo "警告: 馬IDファイルが見つかりません。人気馬・活躍馬の情報を収集します。"
     # 代替収集方法を使用
-    echo "[TASK 5] 人気馬・活躍馬の情報を収集 (開始: $(date))"
+    echo "[TASK 2] 人気馬・活躍馬の情報を収集 (開始: $(date))"
     python $HORSE_SCRAPER --source recent --years $TARGET_YEAR $(($TARGET_YEAR-1)) --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --limit $MAX_RACES > scraping_logs/active_horses_${TIMESTAMP}.log 2>&1
 else
     echo "馬情報の収集に使用するファイル: $LATEST_HORSE_IDS"
 
     # 取得したレースに出場した馬の詳細情報を収集
-    echo "[TASK 5] 出場馬の詳細情報を収集 (開始: $(date))"
+    echo "[TASK 2] 出場馬の詳細情報を収集 (開始: $(date))"
     python $HORSE_SCRAPER --source file --file "$LATEST_HORSE_IDS" --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --limit $MAX_RACES > scraping_logs/race_horses_${TIMESTAMP}.log 2>&1
 fi
 
 echo "馬データ収集完了 ($(date))"
 
 # 重要レース（GI・GIIなど）の収集
-echo "[TASK 6] 重要レースの追加確認 (開始: $(date))"
+echo "[TASK 3] 重要レースの追加確認 (開始: $(date))"
 
-# 大きなレース（主にGI）が開催される月/場所の組み合わせを確認
-# 春のGI
-echo "春のGIレースデータ収集 (開始: $(date))"
-python $RACE_SCRAPER --year $TARGET_YEAR --months 3 4 5 --places 05 06 08 09 --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --max_races $(($MAX_RACES/2)) > scraping_logs/spring_GI_races_${TIMESTAMP}.log 2>&1
-
-# 夏のGI
-echo "夏のGIレースデータ収集 (開始: $(date))"
-python $RACE_SCRAPER --year $TARGET_YEAR --months 6 7 8 --places 01 02 04 07 09 --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --max_races $(($MAX_RACES/2)) > scraping_logs/summer_GI_races_${TIMESTAMP}.log 2>&1
-
-# 秋のGI
-echo "秋のGIレースデータ収集 (開始: $(date))"
-python $RACE_SCRAPER --year $TARGET_YEAR --months 9 10 11 --places 05 06 08 09 --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --max_races $(($MAX_RACES/2)) > scraping_logs/autumn_GI_races_${TIMESTAMP}.log 2>&1
-
-# 冬のGI
-echo "冬のGIレースデータ収集 (開始: $(date))"
-# 注意: 年をまたぐので12月は現在の年、1-2月は翌年を指定
-# 12月
-python $RACE_SCRAPER --year $TARGET_YEAR --months 12 --places 05 06 08 09 --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --max_races $(($MAX_RACES/4)) > scraping_logs/winter_GI_races_dec_${TIMESTAMP}.log 2>&1
-# 1-2月（翌年）
-# 注意: 実行年の1-2月のデータは別途収集済み
-if [ $TARGET_YEAR -ne $(date +"%Y") ]; then
-    NEXT_YEAR=$(($TARGET_YEAR+1))
-    python $RACE_SCRAPER --year $NEXT_YEAR --months 1 2 --places 05 06 08 09 --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --max_races $(($MAX_RACES/4)) > scraping_logs/winter_GI_races_janfeb_${TIMESTAMP}.log 2>&1
-fi
+# 主要競馬場で開催される可能性が高い重要レースを対象に追加収集
+echo "主要競馬場のレースデータ確認 (開始: $(date))"
+python $RACE_SCRAPER --year $TARGET_YEAR --places 05 06 08 09 --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --max_races $(($MAX_RACES/2)) > scraping_logs/major_tracks_races_${TIMESTAMP}.log 2>&1
 
 # データ収集の結果サマリーを表示
 echo "======================================================================="
