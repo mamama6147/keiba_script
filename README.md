@@ -30,12 +30,32 @@ python fixed-horse-scraper.py --source file --file "keiba_data/horse_ids_2023_20
 ### 年間データの自動収集（推奨）
 
 ```bash
-# 対話モードで実行
+# 対話モードで実行（レースデータと馬情報の両方を収集）
 ./collect-race-data.sh --year 2023 --max 2000 --batch 3 --pause 45
+
+# レースデータのみを収集（馬情報は収集しない）
+./collect-race-data.sh --year 2023 --max 2000 --batch 3 --no-horses
+
+# 馬情報のみを収集（レースデータは収集しない）
+./collect-race-data.sh --year 2023 --batch 3 --horses-only
 
 # バックグラウンドで実行（推奨）
 nohup bash ./collect-race-data.sh --year 2020 --max 2000 --batch 3 &
 ```
+
+### シェルスクリプトのオプション一覧
+
+| オプション | 説明 |
+|------------|------|
+| `-y, --year YEAR` | 対象年を指定（デフォルト: 現在の年） |
+| `-m, --max NUM` | 競馬場ごとの最大取得レース数（デフォルト: 300） |
+| `-b, --batch NUM` | バッチサイズ（デフォルト: 2） |
+| `-p, --pause SECONDS` | バッチ間の待機時間（秒）（デフォルト: 5） |
+| `-k, --keep NUM` | 保持する中間結果ファイル数（デフォルト: 1） |
+| `--keep-all` | すべての中間結果ファイルを保持 |
+| `--no-cleanup` | 最終結果後も中間ファイルを削除しない |
+| `--no-horses` | 馬情報の収集を行わない |
+| `--horses-only` | レースデータをスキップし、馬情報のみを収集 |
 
 ## 効率的なデータ収集の仕組み
 
@@ -63,6 +83,7 @@ nohup bash ./collect-race-data.sh --year 2020 --max 2000 --batch 3 &
 - 効率的なスキップロジックによる処理時間の短縮（約70-80%のリクエスト削減）
 - 収集したCSVファイルの自動結合
 - 馬IDの集約処理
+- レースデータと馬情報の収集プロセスを個別に制御可能
 
 ## 出力ファイル
 
@@ -77,3 +98,4 @@ nohup bash ./collect-race-data.sh --year 2020 --max 2000 --batch 3 &
 - サーバー負荷を考慮して `--pause` パラメータで適切な間隔を設定してください
 - 長時間の実行が必要な場合は `nohup` コマンドでバックグラウンド実行をお勧めします
 - ログファイルは `direct_race_scraping.log` と `scraping_logs/` ディレクトリに保存されます
+- 大量のデータを収集する場合は、`--max`パラメータを2000程度に設定することをお勧めします
