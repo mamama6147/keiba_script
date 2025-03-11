@@ -6,6 +6,7 @@ import random
 import logging
 import json
 import os
+import glob
 from datetime import datetime
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -391,9 +392,45 @@ def scrape_horse_training(horse_id, session=None):
     
     return None
 
+# 既存の馬情報をロードする関数
+def load_existing_horse_ids():
+    """
+    horse_data/horse_info_*.csv ファイルから既に取得済みの馬IDをロードする
+    
+    Returns:
+        set: 取得済みの馬IDのセット
+    """
+    existing_horse_ids = set()
+    
+    # horse_info_*.csvファイルを検索
+    info_files = glob.glob(os.path.join(OUTPUT_DIR, "horse_info_*.csv"))
+    
+    for file in info_files:
+        try:
+            df = pd.read_csv(file, encoding='utf-8-sig')
+            if 'horse_id' in df.columns:
+                horse_ids = df['horse_id'].astype(str).tolist()
+                existing_horse_ids.update(horse_ids)
+                logger.info(f"Loaded {len(horse_ids)} existing horse IDs from {file}")
+        except Exception as e:
+            logger.error(f"Error loading existing horse IDs from {file}: {str(e)}")
+    
+    logger.info(f"Total existing horse IDs loaded: {len(existing_horse_ids)}")
+    return existing_horse_ids
+
 # 複数の馬情報を収集
-def scrape_multiple_horses(horse_ids, include_training=False, batch_size=3, pause_between_batches=45, max_retries=2):
-    """複数の馬の情報を収集する関数"""
+def scrape_multiple_horses(horse_ids, include_training=False, batch_size=3, pause_between_batches=45, max_retries=2, skip_existing=False):
+    """
+    複数の馬の情報を収集する関数
+    
+    Args:
+        horse_ids: 収集対象の馬IDリスト
+        include_training: 調教情報も収集するか
+        batch_size: バッチサイズ
+        pause_between_batches: バッチ間の待機時間（秒）
+        max_retries: 最大リトライ回数
+        skip_existing: 既存の馬データをスキップするか
+    """
     all_horse_info = []
     all_horse_history = []
     all_horse_training = []
@@ -402,14 +439,28 @@ def scrape_multiple_horses(horse_ids, include_training=False, batch_size=3, paus
     # 処理済みの馬IDを記録
     processed_horses = set()
     
+    # 既存の馬データをロード（オプション）
+    existing_horse_ids = set()
+    if skip_existing:
+        existing_horse_ids = load_existing_horse_ids()
+        logger.info(f"Will skip {len(existing_horse_ids)} existing horses")
+    
+    # スキップされた馬のカウント
+    skipped_count = 0
+    
     # バッチ処理
     for i in range(0, len(horse_ids), batch_size):
         batch = horse_ids[i:i+batch_size]
         logger.info(f"Processing horse batch {i//batch_size + 1}/{(len(horse_ids) + batch_size - 1)//batch_size}")
         
         for j, horse_id in enumerate(batch):
-            if horse_id in processed_horses:
-                logger.info(f"Skipping already processed horse {j+1}/{len(batch)}: {horse_id}")
+            # 既に処理済みの馬またはDBに存在する馬をスキップ
+            if horse_id in processed_horses or (skip_existing and horse_id in existing_horse_ids):
+                if horse_id in existing_horse_ids:
+                    logger.info(f"Skipping existing horse in database {j+1}/{len(batch)}: {horse_id}")
+                    skipped_count += 1
+                else:
+                    logger.info(f"Skipping already processed horse {j+1}/{len(batch)}: {horse_id}")
                 continue
                 
             logger.info(f"Scraping horse {j+1}/{len(batch)}: {horse_id}")
@@ -469,6 +520,10 @@ def scrape_multiple_horses(horse_ids, include_training=False, batch_size=3, paus
         if i + batch_size < len(horse_ids):
             logger.info(f"Pausing for {pause_between_batches} seconds between batches")
             time.sleep(pause_between_batches)
+    
+    # スキップされた馬の数を表示
+    if skip_existing:
+        logger.info(f"Skipped {skipped_count} horses that already exist in the database")
     
     # 最終結果の保存
     return save_horse_results(all_horse_info, all_horse_history, all_horse_training)
@@ -744,6 +799,8 @@ def parse_args():
                         help='Pause time between batches in seconds')
     parser.add_argument('--limit', type=int, default=0,
                         help='Limit number of horses to collect (0 for all)')
+    parser.add_argument('--skip-existing', action='store_true',
+                        help='Skip horses that already exist in horse_data/horse_info_*.csv files')
     
     return parser.parse_args()
 
@@ -778,14 +835,15 @@ def main():
         horse_ids = horse_ids[:args.limit]
     
     print(f"Starting data collection for {len(horse_ids)} horses")
-    print(f"Settings: batch_size={args.batch_size}, pause={args.pause}s, include_training={args.include_training}")
+    print(f"Settings: batch_size={args.batch_size}, pause={args.pause}s, include_training={args.include_training}, skip_existing={args.skip_existing}")
     
     # 馬情報の収集
     horse_info_df, horse_history_df, horse_training_df = scrape_multiple_horses(
         horse_ids, 
         include_training=args.include_training,
         batch_size=args.batch_size, 
-        pause_between_batches=args.pause
+        pause_between_batches=args.pause,
+        skip_existing=args.skip_existing
     )
     
     if horse_info_df is not None:
