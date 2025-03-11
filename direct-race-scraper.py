@@ -65,55 +65,34 @@ PLACE_DICT = {
     '09': '阪神', '10': '小倉'
 }
 
-# 季節に基づく開催場所のフィルタリング
-def get_active_places_for_month(month):
-    """月に基づいて開催されている可能性が高い競馬場コードを返す"""
-    if 1 <= month <= 2 or month == 12:  # 冬
-        return ['05', '06', '08', '09', '10']  # 東京、中山、京都、阪神、小倉
-    elif 3 <= month <= 5:  # 春
-        return ['03', '04', '05', '06', '07', '08', '09', '10']  # 福島、新潟、東京、中山、中京、京都、阪神、小倉
-    elif 6 <= month <= 8:  # 夏
-        return ['01', '02', '03', '04', '07', '09']  # 札幌、函館、福島、新潟、中京、阪神
-    elif 9 <= month <= 11:  # 秋
-        return ['03', '04', '05', '06', '07', '08', '09', '10']  # 福島、新潟、東京、中山、中京、京都、阪神、小倉
-    else:
-        return ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10']  # すべて
-
 # レースIDを生成してループする
-def generate_race_ids(year, months=None, places=None):
+def generate_race_ids(year, places=None):
     """
     指定された条件に基づいてレースIDを生成する
     
     Args:
         year: 対象年
-        months: 対象月のリスト（Noneの場合は全ての月）
-        places: 対象競馬場コードのリスト（Noneの場合は季節に応じた競馬場）
+        places: 対象競馬場コードのリスト（Noneの場合はすべての競馬場）
     
     Yields:
         str: 生成されたレースID
     """
-    if months is None:
-        months = list(range(1, 13))  # 1月から12月
-    
     year_str = str(year)
     
-    for month in months:
-        if places is None:
-            active_places = get_active_places_for_month(month)
-        else:
-            active_places = places
-        
-        logger.info(f"Generating race IDs for {year}/{month} with places: {', '.join([PLACE_DICT.get(p, p) for p in active_places])}")
-        
-        for place_code in active_places:
-            # 各開催回（1~6回）
-            for kai in range(1, 7):
-                # 各開催日（1~12日）
-                for kaisai_day in range(1, 13):
-                    # 各レース（1~12R）
-                    for race_num in range(1, 13):
-                        race_id = f"{year_str}{place_code}{str(kai).zfill(2)}{str(kaisai_day).zfill(2)}{str(race_num).zfill(2)}"
-                        yield race_id
+    if places is None:
+        places = list(PLACE_DICT.keys())  # すべての競馬場
+    
+    logger.info(f"Generating race IDs for {year} with places: {', '.join([PLACE_DICT.get(p, p) for p in places])}")
+    
+    for place_code in places:
+        # 各開催回（1~6回）
+        for kai in range(1, 7):
+            # 各開催日（1~12日）
+            for kaisai_day in range(1, 13):
+                # 各レース（1~12R）
+                for race_num in range(1, 13):
+                    race_id = f"{year_str}{place_code}{str(kai).zfill(2)}{str(kaisai_day).zfill(2)}{str(race_num).zfill(2)}"
+                    yield race_id
 
 # レースの有効性をチェック
 def is_valid_race(race_id, session=None):
@@ -629,14 +608,13 @@ def extract_horse_ids(soup):
     return horse_ids
 
 # 複数レースのデータ収集
-def scrape_races_by_id_pattern(year, months=None, places=None, max_races=None, batch_size=3, pause_between_batches=45):
+def scrape_races_by_id_pattern(year, places=None, max_races=None, batch_size=3, pause_between_batches=45):
     """
     レースIDパターンに基づいて複数レースの結果を収集する
     
     Args:
         year: 対象年
-        months: 対象月のリスト（Noneの場合は全ての月）
-        places: 対象競馬場コードのリスト（Noneの場合は季節に応じた競馬場）
+        places: 対象競馬場コードのリスト（Noneの場合はすべての競馬場）
         max_races: 最大収集レース数（Noneの場合は制限なし）
         batch_size: バッチあたりの処理レース数
         pause_between_batches: バッチ間の待機時間（秒）
@@ -669,7 +647,7 @@ def scrape_races_by_id_pattern(year, months=None, places=None, max_races=None, b
     # 結果の中間保存用タイムスタンプ
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
-    for race_id in generate_race_ids(year, months, places):
+    for race_id in generate_race_ids(year, places):
         # 既に処理済みのレースはスキップ
         if race_id in skip_ids:
             logger.debug(f"Skipping already processed race: {race_id}")
@@ -762,10 +740,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Netkeiba Race Data Scraper by Direct ID Pattern')
     parser.add_argument('--year', type=int, default=2024,
                         help='Year to scrape data for')
-    parser.add_argument('--months', type=int, nargs='+',
-                        help='Months to scrape (1-12, default: all months)')
     parser.add_argument('--places', type=str, nargs='+',
-                        help='Place codes to scrape (01-10, default: season appropriate places)')
+                        help='Place codes to scrape (01-10, default: all places)')
     parser.add_argument('--batch_size', type=int, default=3,
                         help='Number of races to process in a batch')
     parser.add_argument('--pause', type=int, default=45,
@@ -779,39 +755,33 @@ def parse_args():
 def main():
     args = parse_args()
     year = args.year
-    months = args.months  # None or list
     places = args.places  # None or list
     batch_size = args.batch_size
     pause_time = args.pause
     max_races = args.max_races if args.max_races > 0 else None
     
-    # 月が指定されている場合はリスト化
-    if months:
-        print(f"Starting race data collection for {year}, months: {months}")
-    else:
-        print(f"Starting race data collection for {year}, all months")
+    print(f"Starting race data collection for {year}")
     
     # 競馬場が指定されている場合
     if places:
         place_names = [f"{p}({PLACE_DICT.get(p, 'Unknown')})" for p in places]
         print(f"Targeting race places: {', '.join(place_names)}")
     else:
-        print(f"Targeting season-appropriate race places")
+        print(f"Targeting all race places")
     
     print(f"Settings: batch_size={batch_size}, pause={pause_time}s, max_races={max_races or 'unlimited'}")
     
     # レースデータ収集
     races_df, race_detailed_infos, horse_ids = scrape_races_by_id_pattern(
-        year, months, places, max_races, batch_size, pause_time
+        year, places, max_races, batch_size, pause_time
     )
     
     # 結果の保存
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     if races_df is not None:
-        # 月の文字列を作成
-        month_str = "_".join([str(m) for m in months]) if months else "all"
-        filename = f"races_{year}_{month_str}_{timestamp}.csv"
+        # 結果のファイル名を作成
+        filename = f"races_{year}_{timestamp}.csv"
         
         # CSVを保存する前に天候と馬場情報が含まれているか確認
         if 'weather' not in races_df.columns:
@@ -822,13 +792,13 @@ def main():
         races_df.to_csv(f"{OUTPUT_DIR}/{filename}", index=False, encoding='utf-8-sig')
         print(f"Saved race data to {filename}")
         
-        info_filename = f"race_infos_{year}_{month_str}_{timestamp}.json"
+        info_filename = f"race_infos_{year}_{timestamp}.json"
         with open(f"{OUTPUT_DIR}/{info_filename}", 'w', encoding='utf-8') as f:
             json.dump(race_detailed_infos, f, ensure_ascii=False, indent=2)
         print(f"Saved race info to {info_filename}")
         
         # 馬IDを保存
-        horse_filename = f"horse_ids_{year}_{month_str}_{timestamp}.json"
+        horse_filename = f"horse_ids_{year}_{timestamp}.json"
         with open(f"{OUTPUT_DIR}/{horse_filename}", 'w', encoding='utf-8') as f:
             json.dump(horse_ids, f, ensure_ascii=False)
         print(f"Saved {len(horse_ids)} horse IDs to {horse_filename}")
