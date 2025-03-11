@@ -5,9 +5,9 @@
 
 # デフォルト値
 TARGET_YEAR=$(date +"%Y")  # デフォルトは現在の年
-MAX_RACES=300
+MAX_RACES=1000
 BATCH_SIZE=2
-PAUSE_SECONDS=5
+PAUSE_SECONDS=2
 KEEP_INTERMEDIATE=1        # 保持する中間結果ファイル数（各タイプごと）
 CLEANUP_INTERMEDIATE=true  # 最終結果が得られた後に中間ファイルを削除するか
 COLLECT_HORSES=true        # 馬情報を収集するかどうか
