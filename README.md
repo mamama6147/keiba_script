@@ -23,21 +23,27 @@ python direct-race-scraper.py --year 2023 --places 01 05 09 --batch_size 3 --pau
 ### 馬データの収集
 
 ```bash
-# 特定の馬IDリストから馬データを収集
+# 特定の馬IDリストから馬データを収集（既存のデータはスキップ）
+python fixed-horse-scraper.py --source file --file "keiba_data/horse_ids_2023_20230101_120000.json" --batch_size 3 --pause 45 --limit 500 --skip-existing
+
+# 特定の馬IDリストから馬データを収集（すべての馬を再取得）
 python fixed-horse-scraper.py --source file --file "keiba_data/horse_ids_2023_20230101_120000.json" --batch_size 3 --pause 45 --limit 500
 ```
 
 ### 年間データの自動収集（推奨）
 
 ```bash
-# 対話モードで実行（レースデータと馬情報の両方を収集）
+# 対話モードで実行（レースデータと馬情報の両方を収集、既存の馬情報はスキップ）
 ./collect-race-data.sh --year 2023 --max 2000 --batch 3 --pause 45
 
 # レースデータのみを収集（馬情報は収集しない）
 ./collect-race-data.sh --year 2023 --max 2000 --batch 3 --no-horses
 
-# 馬情報のみを収集（レースデータは収集しない）
+# 馬情報のみを収集（レースデータは収集しない、既存の馬情報はスキップ）
 ./collect-race-data.sh --year 2023 --batch 3 --horses-only
+
+# 馬情報のみを収集（既存の馬情報も含めて再取得）
+./collect-race-data.sh --year 2023 --batch 3 --horses-only --no-skip-horses
 
 # バックグラウンドで実行（推奨）
 nohup bash ./collect-race-data.sh --year 2020 --max 2000 --batch 3 &
@@ -56,6 +62,8 @@ nohup bash ./collect-race-data.sh --year 2020 --max 2000 --batch 3 &
 | `--no-cleanup` | 最終結果後も中間ファイルを削除しない |
 | `--no-horses` | 馬情報の収集を行わない |
 | `--horses-only` | レースデータをスキップし、馬情報のみを収集 |
+| `--no-skip-horses` | 既存の馬情報もスキップせずに再取得する |
+| `--collect-all-horses` | 既存の馬情報も含めてすべて取得する（`--no-skip-horses`の別名） |
 
 ## 効率的なデータ収集の仕組み
 
@@ -70,7 +78,12 @@ nohup bash ./collect-race-data.sh --year 2020 --max 2000 --batch 3 &
    - ある開催日（例：2日目）の1Rが存在しなければ、次の開催日（3日目）に進む
    - ある開催回のすべての開催日で1Rが存在しなければ、次の開催回に進む
 
-3. **競馬場ごとの個別処理**
+3. **既存データのスキップ**
+   - 既存の馬情報ファイル（`horse_data/horse_info_*.csv`）から馬IDを抽出
+   - 既に情報が取得済みの馬はスキップすることで、重複収集を防止
+   - 完全再取得も`--no-skip-horses`オプションで選択可能
+
+4. **競馬場ごとの個別処理**
    - 各競馬場（01-10）ごとに個別にデータを収集
    - すべての競馬場のデータを漏れなく取得
 
@@ -84,6 +97,7 @@ nohup bash ./collect-race-data.sh --year 2020 --max 2000 --batch 3 &
 - 収集したCSVファイルの自動結合
 - 馬IDの集約処理
 - レースデータと馬情報の収集プロセスを個別に制御可能
+- 既存データの重複収集防止機能
 
 ## 出力ファイル
 
@@ -92,10 +106,14 @@ nohup bash ./collect-race-data.sh --year 2020 --max 2000 --batch 3 &
 - `keiba_data/races_[年]_[タイムスタンプ].csv` - 収集したすべてのレースデータ
 - `keiba_data/horse_ids_[年]_[タイムスタンプ].json` - 収集したすべての馬ID
 - `horse_data/horse_info_[タイムスタンプ].csv` - 収集した馬の情報
+- `horse_data/horse_info_[タイムスタンプ].json` - 収集した馬の情報（JSON形式、血統情報など詳細データを含む）
+- `horse_data/horse_history_[タイムスタンプ].csv` - 馬の出走履歴
+- `horse_data/horse_training_[タイムスタンプ].csv` - 馬の調教データ（--include_training オプション使用時）
 
 ## 注意事項
 
 - サーバー負荷を考慮して `--pause` パラメータで適切な間隔を設定してください
 - 長時間の実行が必要な場合は `nohup` コマンドでバックグラウンド実行をお勧めします
-- ログファイルは `direct_race_scraping.log` と `scraping_logs/` ディレクトリに保存されます
+- ログファイルは `direct_race_scraping.log`、`horse_scraping.log` と `scraping_logs/` ディレクトリに保存されます
 - 大量のデータを収集する場合は、`--max`パラメータを2000程度に設定することをお勧めします
+- デフォルトでは既存の馬情報はスキップされます。すべての馬を再取得したい場合は `--no-skip-horses` オプションを使用してください
