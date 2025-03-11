@@ -5,6 +5,7 @@ scraping_logs/
 
 # Log files
 *.log
+nohup.out
 
 # Intermediate files
 intermediate_*.csv
