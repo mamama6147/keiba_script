@@ -165,7 +165,7 @@ for i in "${!PLACE_CODES[@]}"; do
     PLACE_NAME=${PLACE_NAMES[$i]}
     
     echo "[TASK 1-${i}] ${TARGET_YEAR}年 ${PLACE_NAME}(${PLACE_CODE})競馬場のレースデータを収集 (開始: $(date))"
-    python $RACE_SCRAPER --year $TARGET_YEAR --places $PLACE_CODE --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --max_races $MAX_RACES > scraping_logs/races_${PLACE_CODE}_${TIMESTAMP}.log 2>&1
+    python $RACE_SCRAPER --year $TARGET_YEAR --places $PLACE_CODE --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --max_races $MAX_RACES --efficient > scraping_logs/races_${PLACE_CODE}_${TIMESTAMP}.log 2>&1
     
     # 中間ファイルのクリーンアップ
     cleanup_intermediate_files "intermediate_races_*" $KEEP_INTERMEDIATE "$OUTPUT_DIR"
@@ -242,6 +242,50 @@ if [ -n "$horse_files" ]; then
 else
   echo "  馬情報CSVファイルがありません"
 fi
+
+# 収集したCSVファイルから馬IDを抽出して結合
+echo "[TASK 4] すべての馬IDを1つのファイルに集約します"
+FINAL_HORSE_IDS="keiba_data/horse_ids_${TARGET_YEAR}_${TIMESTAMP}.json"
+
+# 一時的なJSONマージスクリプト
+MERGE_SCRIPT="merge_horse_ids.py"
+cat > $MERGE_SCRIPT << 'EOL'
+#!/usr/bin/env python
+import json
+import glob
+import sys
+
+# 結合先のファイル名
+output_file = sys.argv[1]
+
+# 全ての馬IDを格納するセット（重複を排除）
+all_horse_ids = set()
+
+# 全てのhorse_ids_*.jsonファイルを読み込み
+for filename in glob.glob('keiba_data/horse_ids_*.json'):
+    if filename == output_file:
+        continue
+    try:
+        with open(filename, 'r') as f:
+            horse_ids = json.load(f)
+            # リストまたは文字列の馬IDを追加
+            if isinstance(horse_ids, list):
+                all_horse_ids.update(horse_ids)
+            elif isinstance(horse_ids, str):
+                all_horse_ids.add(horse_ids)
+    except Exception as e:
+        print(f"Error reading {filename}: {e}")
+
+# 重複のない馬IDリストをJSONファイルに書き出し
+with open(output_file, 'w') as f:
+    json.dump(list(all_horse_ids), f)
+
+print(f"Merged {len(all_horse_ids)} unique horse IDs to {output_file}")
+EOL
+
+# スクリプトを実行
+python $MERGE_SCRIPT $FINAL_HORSE_IDS
+rm $MERGE_SCRIPT
 
 # すべての処理が終了したら、設定に応じて中間ファイルを完全にクリーンアップ
 if [ "$CLEANUP_INTERMEDIATE" = true ]; then
