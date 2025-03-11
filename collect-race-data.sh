@@ -10,6 +10,7 @@ BATCH_SIZE=2
 PAUSE_SECONDS=5
 KEEP_INTERMEDIATE=1        # 保持する中間結果ファイル数（各タイプごと）
 CLEANUP_INTERMEDIATE=true  # 最終結果が得られた後に中間ファイルを削除するか
+COLLECT_HORSES=true        # 馬情報を収集するかどうか
 
 # 使い方の表示
 function show_usage {
@@ -23,11 +24,18 @@ function show_usage {
     echo "  -k, --keep NUM        保持する中間結果ファイル数 (デフォルト: $KEEP_INTERMEDIATE)"
     echo "      --keep-all        すべての中間結果ファイルを保持"
     echo "      --no-cleanup      最終結果後も中間ファイルを削除しない"
+    echo "      --no-horses       馬情報の収集を行わない"
+    echo "      --horses-only     レースデータをスキップし、馬情報のみを収集"
     echo "  -h, --help            このヘルプを表示"
     echo ""
     echo "例: $0 --year 2023 --max 500 --batch 3 --pause 45 --keep 2"
+    echo "例: $0 --year 2023 --max 500 --no-horses"
+    echo "例: $0 --year 2023 --horses-only"
     exit 1
 }
+
+# レースデータ収集フラグ（デフォルトはtrue）
+COLLECT_RACES=true
 
 # コマンドライン引数の解析
 while [[ $# -gt 0 ]]; do
@@ -58,6 +66,15 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-cleanup)
             CLEANUP_INTERMEDIATE=false
+            shift
+            ;;
+        --no-horses)
+            COLLECT_HORSES=false
+            shift
+            ;;
+        --horses-only)
+            COLLECT_RACES=false
+            COLLECT_HORSES=true
             shift
             ;;
         -h|--help)
@@ -134,122 +151,85 @@ echo "  対象年: ${TARGET_YEAR}年"
 echo "  競馬場ごとの最大レース数: $MAX_RACES"
 echo "  バッチサイズ: $BATCH_SIZE"
 echo "  バッチ間待機時間: $PAUSE_SECONDS秒"
+echo "  レースデータ収集: $([ "$COLLECT_RACES" = true ] && echo "有効" || echo "無効")"
+echo "  馬情報収集: $([ "$COLLECT_HORSES" = true ] && echo "有効" || echo "無効")"
 echo "======================================================================="
 
 # ファイル名の確認と表示
 RACE_SCRAPER="direct-race-scraper.py"
 HORSE_SCRAPER="fixed-horse-scraper.py"
 
-if [ ! -f "$RACE_SCRAPER" ]; then
+if [ "$COLLECT_RACES" = true ] && [ ! -f "$RACE_SCRAPER" ]; then
     echo "エラー: $RACE_SCRAPER が見つかりません。"
     echo "スクリプトと同じディレクトリに配置されていることを確認してください。"
     exit 1
 fi
 
-if [ ! -f "$HORSE_SCRAPER" ]; then
+if [ "$COLLECT_HORSES" = true ] && [ ! -f "$HORSE_SCRAPER" ]; then
     echo "エラー: $HORSE_SCRAPER が見つかりません。"
     echo "スクリプトと同じディレクトリに配置されていることを確認してください。"
     exit 1
 fi
 
 echo "使用するスクリプト:"
-echo "- レーススクレイパー: $RACE_SCRAPER"
-echo "- 馬情報スクレイパー: $HORSE_SCRAPER"
-
-# 各競馬場ごとに個別にデータを収集
-PLACE_CODES=("01" "02" "03" "04" "05" "06" "07" "08" "09" "10")
-PLACE_NAMES=("札幌" "函館" "福島" "新潟" "東京" "中山" "中京" "京都" "阪神" "小倉")
-
-for i in "${!PLACE_CODES[@]}"; do
-    PLACE_CODE=${PLACE_CODES[$i]}
-    PLACE_NAME=${PLACE_NAMES[$i]}
-    
-    echo "[TASK 1-${i}] ${TARGET_YEAR}年 ${PLACE_NAME}(${PLACE_CODE})競馬場のレースデータを収集 (開始: $(date))"
-    python $RACE_SCRAPER --year $TARGET_YEAR --places $PLACE_CODE --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --max_races $MAX_RACES --efficient > scraping_logs/races_${PLACE_CODE}_${TIMESTAMP}.log 2>&1
-    
-    # 中間ファイルのクリーンアップ
-    cleanup_intermediate_files "intermediate_races_*" $KEEP_INTERMEDIATE "$OUTPUT_DIR"
-    cleanup_intermediate_files "intermediate_race_infos_*" $KEEP_INTERMEDIATE "$OUTPUT_DIR"
-    
-    # 各競馬場の収集後、少し休止
-    echo "${PLACE_NAME}(${PLACE_CODE})競馬場のデータ収集完了 - 10分休止します ($(date))"
-    sleep 600  # 10分休止
-done
-
-# 最新の馬IDファイルを取得
-LATEST_HORSE_IDS=$(ls -t keiba_data/horse_ids_*.json 2>/dev/null | head -1)
-
-# 馬情報の収集
-if [ -z "$LATEST_HORSE_IDS" ]; then
-    echo "警告: 馬IDファイルが見つかりません。人気馬・活躍馬の情報を収集します。"
-    # 代替収集方法を使用
-    echo "[TASK 2] 人気馬・活躍馬の情報を収集 (開始: $(date))"
-    python $HORSE_SCRAPER --source recent --years $TARGET_YEAR $(($TARGET_YEAR-1)) --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --limit $MAX_RACES > scraping_logs/active_horses_${TIMESTAMP}.log 2>&1
-else
-    echo "馬情報の収集に使用するファイル: $LATEST_HORSE_IDS"
-
-    # 取得したレースに出場した馬の詳細情報を収集
-    echo "[TASK 2] 出場馬の詳細情報を収集 (開始: $(date))"
-    python $HORSE_SCRAPER --source file --file "$LATEST_HORSE_IDS" --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --limit $MAX_RACES > scraping_logs/race_horses_${TIMESTAMP}.log 2>&1
+if [ "$COLLECT_RACES" = true ]; then
+    echo "- レーススクレイパー: $RACE_SCRAPER"
+fi
+if [ "$COLLECT_HORSES" = true ]; then
+    echo "- 馬情報スクレイパー: $HORSE_SCRAPER"
 fi
 
-echo "馬データ収集完了 ($(date))"
+# 各競馬場ごとに個別にレースデータを収集
+if [ "$COLLECT_RACES" = true ]; then
+    PLACE_CODES=("01" "02" "03" "04" "05" "06" "07" "08" "09" "10")
+    PLACE_NAMES=("札幌" "函館" "福島" "新潟" "東京" "中山" "中京" "京都" "阪神" "小倉")
 
-# 収集したCSVファイルを1つに結合
-echo "[TASK 3] 収集したデータファイルを結合します (開始: $(date))"
-FINAL_CSV_FILE="keiba_data/races_${TARGET_YEAR}_${TIMESTAMP}.csv"
+    for i in "${!PLACE_CODES[@]}"; do
+        PLACE_CODE=${PLACE_CODES[$i]}
+        PLACE_NAME=${PLACE_NAMES[$i]}
+        
+        echo "[TASK 1-${i}] ${TARGET_YEAR}年 ${PLACE_NAME}(${PLACE_CODE})競馬場のレースデータを収集 (開始: $(date))"
+        python $RACE_SCRAPER --year $TARGET_YEAR --places $PLACE_CODE --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --max_races $MAX_RACES --efficient > scraping_logs/races_${PLACE_CODE}_${TIMESTAMP}.log 2>&1
+        
+        # 中間ファイルのクリーンアップ
+        cleanup_intermediate_files "intermediate_races_*" $KEEP_INTERMEDIATE "$OUTPUT_DIR"
+        cleanup_intermediate_files "intermediate_race_infos_*" $KEEP_INTERMEDIATE "$OUTPUT_DIR"
+        
+        # 各競馬場の収集後、少し休止
+        echo "${PLACE_NAME}(${PLACE_CODE})競馬場のデータ収集完了 - 10分休止します ($(date))"
+        sleep 600  # 10分休止
+    done
 
-# ヘッダー行だけを最初に取得
-head -n 1 $(ls -t keiba_data/races_*.csv 2>/dev/null | head -1) > "$FINAL_CSV_FILE" 
+    # 収集したCSVファイルを1つに結合
+    echo "[TASK 2] 収集したデータファイルを結合します (開始: $(date))"
+    FINAL_CSV_FILE="keiba_data/races_${TARGET_YEAR}_${TIMESTAMP}.csv"
 
-# 各CSVファイルからヘッダーを除いたデータ行を結合ファイルに追加
-for csv_file in $(ls -t keiba_data/races_*.csv 2>/dev/null); do
-    if [ "$csv_file" != "$FINAL_CSV_FILE" ]; then
-        tail -n +2 "$csv_file" >> "$FINAL_CSV_FILE"
+    # CSVファイルが存在するか確認
+    RACE_CSV_EXISTS=$(ls -t keiba_data/races_*.csv 2>/dev/null | head -1)
+    
+    if [ -n "$RACE_CSV_EXISTS" ]; then
+        # ヘッダー行だけを最初に取得
+        head -n 1 "$RACE_CSV_EXISTS" > "$FINAL_CSV_FILE" 
+
+        # 各CSVファイルからヘッダーを除いたデータ行を結合ファイルに追加
+        for csv_file in $(ls -t keiba_data/races_*.csv 2>/dev/null); do
+            if [ "$csv_file" != "$FINAL_CSV_FILE" ]; then
+                tail -n +2 "$csv_file" >> "$FINAL_CSV_FILE"
+            fi
+        done
+
+        echo "データファイルの結合が完了しました: $FINAL_CSV_FILE"
+    else
+        echo "警告: 結合対象のレースCSVファイルが見つかりません。"
     fi
-done
 
-echo "データファイルの結合が完了しました: $FINAL_CSV_FILE"
+    # 収集したCSVファイルから馬IDを抽出して結合
+    echo "[TASK 3] すべての馬IDを1つのファイルに集約します"
+    FINAL_HORSE_IDS="keiba_data/horse_ids_${TARGET_YEAR}_${TIMESTAMP}.json"
 
-# データ収集の結果サマリーを表示
-echo "======================================================================="
-echo "  収集データサマリー ($(date))"
-echo "======================================================================="
-
-# 最終結合ファイルの統計
-echo "最終レースデータファイル:"
-if [ -f "$FINAL_CSV_FILE" ]; then
-    lines=$(wc -l < "$FINAL_CSV_FILE")
-    lines=$((lines - 1)) # ヘッダー行を除く
-    echo "- $FINAL_CSV_FILE: $lines レース"
-else
-    echo "  結合されたレースCSVファイルがありません"
-fi
-
-# 馬情報データファイルの統計
-echo "馬情報データファイル:"
-horse_files=$(ls -lh horse_data/horse_info_*.csv 2>/dev/null)
-if [ -n "$horse_files" ]; then
-  echo "$horse_files"
-  total_horses=0
-  for csv_file in $(ls horse_data/horse_info_*.csv 2>/dev/null); do
-    lines=$(wc -l < $csv_file)
-    lines=$((lines - 1)) # ヘッダー行を除く
-    echo "- $csv_file: $lines 頭"
-    total_horses=$((total_horses + lines))
-  done
-  echo "総馬数: $total_horses"
-else
-  echo "  馬情報CSVファイルがありません"
-fi
-
-# 収集したCSVファイルから馬IDを抽出して結合
-echo "[TASK 4] すべての馬IDを1つのファイルに集約します"
-FINAL_HORSE_IDS="keiba_data/horse_ids_${TARGET_YEAR}_${TIMESTAMP}.json"
-
-# 一時的なJSONマージスクリプト
-MERGE_SCRIPT="merge_horse_ids.py"
-cat > $MERGE_SCRIPT << 'EOL'
+    # 一時的なJSONマージスクリプト
+    MERGE_SCRIPT="merge_horse_ids.py"
+    cat > $MERGE_SCRIPT << 'EOL'
 #!/usr/bin/env python
 import json
 import glob
@@ -283,9 +263,71 @@ with open(output_file, 'w') as f:
 print(f"Merged {len(all_horse_ids)} unique horse IDs to {output_file}")
 EOL
 
-# スクリプトを実行
-python $MERGE_SCRIPT $FINAL_HORSE_IDS
-rm $MERGE_SCRIPT
+    # スクリプトを実行
+    python $MERGE_SCRIPT $FINAL_HORSE_IDS
+    rm $MERGE_SCRIPT
+fi
+
+# 馬情報の収集
+if [ "$COLLECT_HORSES" = true ]; then
+    # 馬情報収集のタスク番号を設定
+    HORSE_TASK_NUM=$([ "$COLLECT_RACES" = true ] && echo "4" || echo "1")
+    
+    # 最新の馬IDファイルを取得
+    LATEST_HORSE_IDS=$(ls -t keiba_data/horse_ids_*.json 2>/dev/null | head -1)
+
+    if [ -z "$LATEST_HORSE_IDS" ]; then
+        echo "警告: 馬IDファイルが見つかりません。人気馬・活躍馬の情報を収集します。"
+        # 代替収集方法を使用
+        echo "[TASK $HORSE_TASK_NUM] 人気馬・活躍馬の情報を収集 (開始: $(date))"
+        python $HORSE_SCRAPER --source recent --years $TARGET_YEAR $(($TARGET_YEAR-1)) --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --limit $MAX_RACES > scraping_logs/active_horses_${TIMESTAMP}.log 2>&1
+    else
+        echo "馬情報の収集に使用するファイル: $LATEST_HORSE_IDS"
+
+        # 取得したレースに出場した馬の詳細情報を収集
+        echo "[TASK $HORSE_TASK_NUM] 出場馬の詳細情報を収集 (開始: $(date))"
+        python $HORSE_SCRAPER --source file --file "$LATEST_HORSE_IDS" --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --limit $MAX_RACES > scraping_logs/race_horses_${TIMESTAMP}.log 2>&1
+    fi
+
+    echo "馬データ収集完了 ($(date))"
+fi
+
+# データ収集の結果サマリーを表示
+echo "======================================================================="
+echo "  収集データサマリー ($(date))"
+echo "======================================================================="
+
+# レースデータファイルの統計
+if [ "$COLLECT_RACES" = true ]; then
+    echo "最終レースデータファイル:"
+    FINAL_CSV_FILE="keiba_data/races_${TARGET_YEAR}_${TIMESTAMP}.csv"
+    if [ -f "$FINAL_CSV_FILE" ]; then
+        lines=$(wc -l < "$FINAL_CSV_FILE")
+        lines=$((lines - 1)) # ヘッダー行を除く
+        echo "- $FINAL_CSV_FILE: $lines レース"
+    else
+        echo "  結合されたレースCSVファイルがありません"
+    fi
+fi
+
+# 馬情報データファイルの統計
+if [ "$COLLECT_HORSES" = true ]; then
+    echo "馬情報データファイル:"
+    horse_files=$(ls -lh horse_data/horse_info_*.csv 2>/dev/null)
+    if [ -n "$horse_files" ]; then
+      echo "$horse_files"
+      total_horses=0
+      for csv_file in $(ls horse_data/horse_info_*.csv 2>/dev/null); do
+        lines=$(wc -l < $csv_file)
+        lines=$((lines - 1)) # ヘッダー行を除く
+        echo "- $csv_file: $lines 頭"
+        total_horses=$((total_horses + lines))
+      done
+      echo "総馬数: $total_horses"
+    else
+      echo "  馬情報CSVファイルがありません"
+    fi
+fi
 
 # すべての処理が終了したら、設定に応じて中間ファイルを完全にクリーンアップ
 if [ "$CLEANUP_INTERMEDIATE" = true ]; then
