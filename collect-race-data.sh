@@ -11,6 +11,7 @@ PAUSE_SECONDS=5
 KEEP_INTERMEDIATE=1        # 保持する中間結果ファイル数（各タイプごと）
 CLEANUP_INTERMEDIATE=true  # 最終結果が得られた後に中間ファイルを削除するか
 COLLECT_HORSES=true        # 馬情報を収集するかどうか
+SKIP_EXISTING_HORSES=true  # 既存の馬情報をスキップするかどうか
 
 # 使い方の表示
 function show_usage {
@@ -26,11 +27,13 @@ function show_usage {
     echo "      --no-cleanup      最終結果後も中間ファイルを削除しない"
     echo "      --no-horses       馬情報の収集を行わない"
     echo "      --horses-only     レースデータをスキップし、馬情報のみを収集"
+    echo "      --no-skip-horses  既存の馬情報もスキップせずに再取得する"
+    echo "      --collect-all-horses 既存の馬情報も含めてすべて取得する (--no-skip-horsesの別名)"
     echo "  -h, --help            このヘルプを表示"
     echo ""
     echo "例: $0 --year 2023 --max 500 --batch 3 --pause 45 --keep 2"
     echo "例: $0 --year 2023 --max 500 --no-horses"
-    echo "例: $0 --year 2023 --horses-only"
+    echo "例: $0 --year 2023 --horses-only --no-skip-horses"
     exit 1
 }
 
@@ -75,6 +78,10 @@ while [[ $# -gt 0 ]]; do
         --horses-only)
             COLLECT_RACES=false
             COLLECT_HORSES=true
+            shift
+            ;;
+        --no-skip-horses|--collect-all-horses)
+            SKIP_EXISTING_HORSES=false
             shift
             ;;
         -h|--help)
@@ -153,6 +160,7 @@ echo "  バッチサイズ: $BATCH_SIZE"
 echo "  バッチ間待機時間: $PAUSE_SECONDS秒"
 echo "  レースデータ収集: $([ "$COLLECT_RACES" = true ] && echo "有効" || echo "無効")"
 echo "  馬情報収集: $([ "$COLLECT_HORSES" = true ] && echo "有効" || echo "無効")"
+echo "  既存馬情報のスキップ: $([ "$SKIP_EXISTING_HORSES" = true ] && echo "有効" || echo "無効")"
 echo "======================================================================="
 
 # ファイル名の確認と表示
@@ -276,17 +284,26 @@ if [ "$COLLECT_HORSES" = true ]; then
     # 最新の馬IDファイルを取得
     LATEST_HORSE_IDS=$(ls -t keiba_data/horse_ids_*.json 2>/dev/null | head -1)
 
+    # 既存の馬情報をスキップするオプション
+    SKIP_OPTION=""
+    if [ "$SKIP_EXISTING_HORSES" = true ]; then
+        SKIP_OPTION="--skip-existing"
+        echo "既存の馬情報はスキップします"
+    else
+        echo "すべての馬情報を再取得します"
+    fi
+
     if [ -z "$LATEST_HORSE_IDS" ]; then
         echo "警告: 馬IDファイルが見つかりません。人気馬・活躍馬の情報を収集します。"
         # 代替収集方法を使用
         echo "[TASK $HORSE_TASK_NUM] 人気馬・活躍馬の情報を収集 (開始: $(date))"
-        python $HORSE_SCRAPER --source recent --years $TARGET_YEAR $(($TARGET_YEAR-1)) --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --limit $MAX_RACES > scraping_logs/active_horses_${TIMESTAMP}.log 2>&1
+        python $HORSE_SCRAPER --source recent --years $TARGET_YEAR $(($TARGET_YEAR-1)) --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --limit $MAX_RACES $SKIP_OPTION > scraping_logs/active_horses_${TIMESTAMP}.log 2>&1
     else
         echo "馬情報の収集に使用するファイル: $LATEST_HORSE_IDS"
 
         # 取得したレースに出場した馬の詳細情報を収集
         echo "[TASK $HORSE_TASK_NUM] 出場馬の詳細情報を収集 (開始: $(date))"
-        python $HORSE_SCRAPER --source file --file "$LATEST_HORSE_IDS" --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --limit $MAX_RACES > scraping_logs/race_horses_${TIMESTAMP}.log 2>&1
+        python $HORSE_SCRAPER --source file --file "$LATEST_HORSE_IDS" --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --limit $MAX_RACES $SKIP_OPTION > scraping_logs/race_horses_${TIMESTAMP}.log 2>&1
     fi
 
     echo "馬データ収集完了 ($(date))"
