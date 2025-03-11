@@ -290,6 +290,12 @@ def scrape_race_results(race_id, session=None):
                 if 'track_condition' in race_info:
                     df['track_condition'] = race_info['track_condition']
                 
+                # データフレームに天候と馬場情報が確実に含まれるようにする（最終チェック）
+                if 'weather' not in df.columns and 'weather' in race_info:
+                    df['weather'] = race_info['weather']
+                if 'track_condition' not in df.columns and 'track_condition' in race_info:
+                    df['track_condition'] = race_info['track_condition']
+                
                 logger.info(f"Successfully scraped race {race_id}")
                 return df, race_info
             else:
@@ -445,20 +451,38 @@ def extract_race_info(soup, race_id):
                         race_info['race_date'] = race_date_parts[0] + '日'
                 break
     
-    # 直接RaceData01クラスから天候と馬場情報を抽出（新しく追加）
+    # 直接RaceData01クラスから天候と馬場情報を抽出（修正版）
     race_data_elem = soup.select_one('.RaceData01')
     if race_data_elem:
         race_data_text = race_data_elem.get_text(strip=True)
         
-        # 天候の抽出
-        weather_match = re.search(r'天候[:|\uff1a]([^\s/]+)', race_data_text)
+        # 天候の抽出 - 正規表現パターンを修正
+        weather_match = re.search(r'天候\s*[:：]\s*(\S+)', race_data_text)
         if weather_match:
             race_info['weather'] = weather_match.group(1)
         
-        # 馬場状態の抽出
-        track_match = re.search(r'馬場[:|\uff1a]([^\s/]+)', race_data_text)
+        # 馬場状態の抽出 - 正規表現パターンを修正
+        track_match = re.search(r'(芝|ダート)\s*[:：]\s*(\S+)', race_data_text)
         if track_match:
-            race_info['track_condition'] = track_match.group(1)
+            race_info['track_condition'] = track_match.group(2)
+    
+    # バックアップの抽出方法: すべてのspanタグをチェック
+    if 'weather' not in race_info or 'track_condition' not in race_info:
+        span_elements = soup.find_all('span')
+        for span in span_elements:
+            span_text = span.get_text(strip=True)
+            
+            # 天候と馬場状態をチェック
+            if 'weather' not in race_info:
+                weather_match = re.search(r'天候\s*[:：]\s*(\S+)', span_text)
+                if weather_match:
+                    race_info['weather'] = weather_match.group(1)
+            
+            # 馬場状態 - コース種別に続く状態を検索
+            if 'track_condition' not in race_info:
+                track_match = re.search(r'(芝|ダート)\s*[:：]\s*(\S+)', span_text)
+                if track_match:
+                    race_info['track_condition'] = track_match.group(2)
     
     # より詳細なレース情報（クラス、コース種別、距離、馬場状態など）を抽出
     try:
@@ -527,9 +551,9 @@ def extract_race_info(soup, race_id):
             race_info['distance'] = distance
         if course_direction:
             race_info['course_direction'] = course_direction
-        if track_condition:
+        if track_condition and 'track_condition' not in race_info:
             race_info['track_condition'] = track_condition
-        if weather:
+        if weather and 'weather' not in race_info:
             race_info['weather'] = weather
         
         # 別の方法でも詳細情報を取得する
@@ -553,14 +577,30 @@ def extract_race_info(soup, race_id):
                     race_info['distance'] = course_match.group(2)
             
             # 馬場状態 - より広範なパターンに対応
-            track_match = re.search(r'馬場[:|\uff1a](良|稍重|重|不良|良好|悪い)', race_data_text)
-            if track_match and (not 'track_condition' in race_info or not race_info['track_condition']):
-                race_info['track_condition'] = track_match.group(1)
+            if 'track_condition' not in race_info:
+                track_match = re.search(r'(芝|ダート)\s*[:：]\s*(\S+)', race_data_text)
+                if track_match:
+                    race_info['track_condition'] = track_match.group(2)
             
             # 天気 - より広範なパターンに対応
-            weather_match = re.search(r'天候[:|\uff1a](晴|曇|雨|小雨|雪|霧|霞|吹雪)', race_data_text)
-            if weather_match and (not 'weather' in race_info or not race_info['weather']):
-                race_info['weather'] = weather_match.group(1)
+            if 'weather' not in race_info:
+                weather_match = re.search(r'天候\s*[:：]\s*(\S+)', race_data_text)
+                if weather_match:
+                    race_info['weather'] = weather_match.group(1)
+        
+        # さらにバックアップ: race_detailsから抽出
+        if ('race_details' in race_info) and ('weather' not in race_info or 'track_condition' not in race_info):
+            details_text = race_info['race_details']
+            
+            if 'weather' not in race_info:
+                weather_match = re.search(r'天候\s*[:：]\s*(\S+)', details_text)
+                if weather_match:
+                    race_info['weather'] = weather_match.group(1)
+            
+            if 'track_condition' not in race_info:
+                track_match = re.search(r'(芝|ダート)\s*[:：]\s*(\S+)', details_text)
+                if track_match:
+                    race_info['track_condition'] = track_match.group(2)
         
     except Exception as e:
         logger.error(f"Error extracting detailed race info: {str(e)}")
