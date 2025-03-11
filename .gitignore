@@ -1,0 +1,31 @@
+# Output directories
+keiba_data/
+horse_data/
+scraping_logs/
+
+# Log files
+*.log
+
+# Intermediate files
+intermediate_*.csv
+intermediate_*.json
+
+# Debug files
+*.html
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+.DS_Store
