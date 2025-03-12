@@ -161,70 +161,69 @@ cleanup_intermediate_files() {
     fi
 }
 
-# ファイル整理関数：指定年のファイルを年別ディレクトリに移動
+# ファイル整理関数：指定年のファイルをkeiba_data内の年別ディレクトリに移動
 organize_files_by_year() {
     local year=$1
-    local year_dir="${year}"
+    local year_dir="${OUTPUT_DIR}/${year}"
     
     echo "======================================================================="
-    echo "  ${year}年のファイルを整理しています..."
+    echo "  ${year}年のレースデータファイルを整理しています..."
     echo "======================================================================="
     
-    # 年別ディレクトリを作成
+    # keiba_data内に年別ディレクトリを作成
     mkdir -p "${year_dir}"
-    mkdir -p "${year_dir}/keiba_data"
-    mkdir -p "${year_dir}/horse_data"
-    mkdir -p "${year_dir}/scraping_logs"
-    mkdir -p "${year_dir}/keiba_data/debug_html"
-    mkdir -p "${year_dir}/horse_data/debug_html"
+    mkdir -p "${year_dir}/debug_html"
     
     # レースデータ関連ファイルの移動
     echo "レースデータ関連ファイルを移動中..."
-    mv keiba_data/races_${year}_*.csv "${year_dir}/keiba_data/" 2>/dev/null
-    mv keiba_data/race_infos_${year}_*.json "${year_dir}/keiba_data/" 2>/dev/null
-    mv keiba_data/horse_ids_${year}_*.json "${year_dir}/keiba_data/" 2>/dev/null
     
-    # 馬情報関連ファイルの移動（該当年のものを特定するのが難しいため、タイムスタンプで判断）
-    if [ "$COLLECT_HORSES" = true ]; then
-        echo "馬情報関連ファイルを移動中..."
-        # タイムスタンプを基に当日作成された馬情報ファイルを移動
-        find horse_data -name "horse_info_*.csv" -type f -mtime -1 -exec mv {} "${year_dir}/horse_data/" \;
-        find horse_data -name "horse_pedigree_*.csv" -type f -mtime -1 -exec mv {} "${year_dir}/horse_data/" \;
-    fi
+    # レースCSVファイル
+    race_csv_files=$(find ${OUTPUT_DIR} -maxdepth 1 -name "races_${year}_*.csv" -type f)
+    for file in $race_csv_files; do
+        mv "$file" "${year_dir}/"
+        echo "移動: $file -> ${year_dir}/"
+    done
     
-    # ログファイルの移動
-    echo "ログファイルを移動中..."
-    mv scraping_logs/races_*_${TIMESTAMP}.log "${year_dir}/scraping_logs/" 2>/dev/null
+    # レース情報JSONファイル
+    info_json_files=$(find ${OUTPUT_DIR} -maxdepth 1 -name "race_infos_${year}_*.json" -type f)
+    for file in $info_json_files; do
+        mv "$file" "${year_dir}/"
+        echo "移動: $file -> ${year_dir}/"
+    done
     
-    if [ "$COLLECT_HORSES" = true ]; then
-        mv scraping_logs/race_horses_${TIMESTAMP}.log "${year_dir}/scraping_logs/" 2>/dev/null
-        mv scraping_logs/active_horses_${TIMESTAMP}.log "${year_dir}/scraping_logs/" 2>/dev/null
-    fi
+    # 馬IDJSONファイル
+    horse_id_files=$(find ${OUTPUT_DIR} -maxdepth 1 -name "horse_ids_${year}_*.json" -type f)
+    for file in $horse_id_files; do
+        mv "$file" "${year_dir}/"
+        echo "移動: $file -> ${year_dir}/"
+    done
     
-    # デバッグHTMLファイルの移動（タイムスタンプで判断）
+    # デバッグHTMLファイルの移動（特定の年に属するファイルのみ）
     echo "デバッグファイルを移動中..."
-    find keiba_data/debug_html -name "race_*.html" -type f -mtime -1 -exec mv {} "${year_dir}/keiba_data/debug_html/" \;
+    debug_files=$(find ${OUTPUT_DIR}/debug_html -name "race_${year}*.html" -type f)
+    for file in $debug_files; do
+        filename=$(basename "$file")
+        mv "$file" "${year_dir}/debug_html/"
+        echo "移動: $file -> ${year_dir}/debug_html/"
+    done
     
-    if [ "$COLLECT_HORSES" = true ]; then
-        find horse_data/debug_html -name "horse_*.html" -type f -mtime -1 -exec mv {} "${year_dir}/horse_data/debug_html/" \;
-    fi
-    
-    # 進捗ファイルも移動（バックアップとして）
+    # 進捗ファイルをコピー（バックアップとして）
     if [ -f "${OUTPUT_DIR}/race_scraping_progress_${year}.txt" ]; then
-        cp "${OUTPUT_DIR}/race_scraping_progress_${year}.txt" "${year_dir}/keiba_data/"
+        cp "${OUTPUT_DIR}/race_scraping_progress_${year}.txt" "${year_dir}/"
+        echo "コピー: ${OUTPUT_DIR}/race_scraping_progress_${year}.txt -> ${year_dir}/"
     fi
     
     # 移動結果の報告
-    echo "ファイル整理完了："
-    echo "- レースデータ: $(find ${year_dir}/keiba_data -maxdepth 1 -name "races_*.csv" | wc -l) ファイル"
-    echo "- レース情報: $(find ${year_dir}/keiba_data -maxdepth 1 -name "race_infos_*.json" | wc -l) ファイル"
-    echo "- 馬ID: $(find ${year_dir}/keiba_data -maxdepth 1 -name "horse_ids_*.json" | wc -l) ファイル"
-    echo "- ログファイル: $(find ${year_dir}/scraping_logs -type f | wc -l) ファイル"
+    race_files=$(find ${year_dir} -maxdepth 1 -name "races_*.csv" | wc -l)
+    info_files=$(find ${year_dir} -maxdepth 1 -name "race_infos_*.json" | wc -l)
+    id_files=$(find ${year_dir} -maxdepth 1 -name "horse_ids_*.json" | wc -l)
+    debug_files=$(find ${year_dir}/debug_html -type f | wc -l)
     
-    if [ "$COLLECT_HORSES" = true ]; then
-        echo "- 馬情報: $(find ${year_dir}/horse_data -maxdepth 1 -name "horse_info_*.csv" | wc -l) ファイル"
-        echo "- 血統情報: $(find ${year_dir}/horse_data -maxdepth 1 -name "horse_pedigree_*.csv" | wc -l) ファイル"
-    fi
+    echo "ファイル整理完了："
+    echo "- レースデータ: ${race_files} ファイル"
+    echo "- レース情報: ${info_files} ファイル"
+    echo "- 馬ID: ${id_files} ファイル"
+    echo "- デバッグHTML: ${debug_files} ファイル"
     
     echo "======================================================================="
     echo "  ${year}年のデータを ${year_dir}/ ディレクトリに整理しました"
