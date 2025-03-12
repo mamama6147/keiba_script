@@ -701,6 +701,31 @@ def scrape_races_by_id_pattern_efficient(year, places=None, max_races=None, batc
         with open(progress_file, 'r') as f:
             skip_ids = set([line.strip() for line in f.readlines()])
         logger.info(f"Loaded {len(skip_ids)} processed race IDs from progress file")
+        
+        # 進捗ファイルの削除を確認（デバッグメッセージも追加）
+        if places and len(places) == 1:
+            # 特定の競馬場のみの場合、進捗ファイルを初期化するかどうかを確認
+            year_prefix = str(year)
+            place_prefix = places[0]
+            
+            # 進捗ファイルの内容を確認
+            place_specific_ids = [race_id for race_id in skip_ids if race_id.startswith(year_prefix + place_prefix)]
+            other_ids = [race_id for race_id in skip_ids if not race_id.startswith(year_prefix + place_prefix)]
+            
+            logger.info(f"Found {len(place_specific_ids)} IDs for place {place_prefix} and {len(other_ids)} IDs for other places")
+            
+            if len(place_specific_ids) > 0:
+                logger.info(f"Resetting progress for place {place_prefix} in year {year}")
+                
+                # 対象の競馬場のIDだけをスキップリストから除外
+                skip_ids = set(other_ids)
+                
+                # 進捗ファイルを更新（他の競馬場の情報のみを保持）
+                with open(progress_file, 'w') as f:
+                    for race_id in skip_ids:
+                        f.write(f"{race_id}\n")
+                
+                logger.info(f"Progress file updated to skip only {len(skip_ids)} races from other places")
     
     # 結果の中間保存用タイムスタンプ
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -712,65 +737,88 @@ def scrape_races_by_id_pattern_efficient(year, places=None, max_races=None, batc
         logger.warning(f"No valid race IDs generated for {year} with places: {places}")
         return None, [], []
     
-    # 各レースIDを順に処理
-    for race_id in valid_race_ids:
-        # 既に処理済みのレースはスキップ
-        if race_id in skip_ids:
-            logger.debug(f"Skipping already processed race: {race_id}")
-            continue
-        
-        processed_count += 1
-        
-        # ランダム間隔で待機（サーバー負荷軽減）
-        if processed_count > 1 and processed_count % 10 == 0:
-            time.sleep(random.uniform(3, 7))
-        
-        # レース結果を取得
-        logger.info(f"Processing valid race: {race_id}")
-        result, race_info = scrape_race_results(race_id, session=session)
-        
-        # 有効なレースデータが取得できた場合のみカウントアップ
-        if result is not None:
-            valid_count += 1
-            batch_count += 1
-            all_results.append(result)
-            
-            # 馬IDを収集
-            if 'horse_id' in result.columns:
-                horse_ids = result['horse_id'].dropna().unique()
-                all_horse_ids.update(horse_ids)
-        
-        if race_info:
-            all_race_infos.append(race_info)
-        
-        # 進捗ファイルに記録
-        with open(progress_file, 'a') as f:
-            f.write(f"{race_id}\n")
-        
-        # バッチが一定数に達したら中間結果を保存
-        if batch_count >= batch_size:
-            # 中間結果の保存
-            if all_results:
-                save_intermediate_results(all_results, all_race_infos, processed_count)
-            
-            # バッチ間の待機
-            logger.info(f"Pausing for {pause_between_batches} seconds between batches")
-            time.sleep(pause_between_batches)
-            
-            # バッチカウンタをリセット
-            batch_count = 0
-        
-        # 最大レース数に達したら終了
-        if max_races is not None and valid_count >= max_races:
-            logger.info(f"Reached maximum number of races: {max_races}")
-            break
+    # 処理するIDとスキップするIDのセットを比較し、ログに出力
+    valid_ids_set = set(valid_race_ids)
+    skip_count = len(valid_ids_set.intersection(skip_ids))
+    process_count = len(valid_ids_set) - skip_count
     
-    # 最終結果の保存
-    if all_results:
-        combined_df = pd.concat(all_results, ignore_index=True)
-        return combined_df, all_race_infos, list(all_horse_ids)
+    logger.info(f"Total valid race IDs: {len(valid_ids_set)}")
+    logger.info(f"IDs to be skipped: {skip_count}")
+    logger.info(f"IDs to be processed: {process_count}")
     
-    return None, all_race_infos, list(all_horse_ids)
+    try:
+        # 各レースIDを順に処理
+        for race_id in valid_race_ids:
+            # 既に処理済みのレースはスキップ
+            if race_id in skip_ids:
+                logger.info(f"Skipping already processed race: {race_id}")
+                continue
+            
+            processed_count += 1
+            
+            # ランダム間隔で待機（サーバー負荷軽減）
+            if processed_count > 1 and processed_count % 10 == 0:
+                time.sleep(random.uniform(3, 7))
+            
+            # レース結果を取得
+            logger.info(f"Processing valid race: {race_id}")
+            result, race_info = scrape_race_results(race_id, session=session)
+            
+            # 有効なレースデータが取得できた場合のみカウントアップ
+            if result is not None:
+                valid_count += 1
+                batch_count += 1
+                all_results.append(result)
+                
+                # 馬IDを収集
+                if 'horse_id' in result.columns:
+                    horse_ids = result['horse_id'].dropna().unique()
+                    all_horse_ids.update(horse_ids)
+            
+            if race_info:
+                all_race_infos.append(race_info)
+            
+            # 進捗ファイルに記録
+            with open(progress_file, 'a') as f:
+                f.write(f"{race_id}\n")
+            
+            # バッチが一定数に達したら中間結果を保存
+            if batch_count >= batch_size:
+                # 中間結果の保存
+                if all_results:
+                    save_intermediate_results(all_results, all_race_infos, processed_count)
+                
+                # バッチ間の待機
+                logger.info(f"Pausing for {pause_between_batches} seconds between batches")
+                time.sleep(pause_between_batches)
+                
+                # バッチカウンタをリセット
+                batch_count = 0
+            
+            # 最大レース数に達したら終了
+            if max_races is not None and valid_count >= max_races:
+                logger.info(f"Reached maximum number of races: {max_races}")
+                break
+        
+        # 最終結果の保存
+        if all_results:
+            combined_df = pd.concat(all_results, ignore_index=True)
+            return combined_df, all_race_infos, list(all_horse_ids)
+        
+        return None, all_race_infos, list(all_horse_ids)
+    
+    except Exception as e:
+        logger.error(f"Error in scrape_races_by_id_pattern_efficient: {str(e)}")
+        # エラーが発生しても中間結果を保存
+        if all_results:
+            save_intermediate_results(all_results, all_race_infos, processed_count)
+            try:
+                combined_df = pd.concat(all_results, ignore_index=True)
+                return combined_df, all_race_infos, list(all_horse_ids)
+            except:
+                logger.error("Failed to combine results after error")
+        
+        return None, all_race_infos, list(all_horse_ids)
 
 # 中間結果を保存
 def save_intermediate_results(results, race_infos, count_index):
@@ -808,6 +856,8 @@ def parse_args():
                         help='Maximum number of races to collect (0 for no limit)')
     parser.add_argument('--efficient', action='store_true',
                         help='Use efficient race ID generation method')
+    parser.add_argument('--reset_progress', action='store_true',
+                        help='Reset progress for the specified places')
     
     return parser.parse_args()
 
@@ -820,6 +870,7 @@ def main():
     pause_time = args.pause
     max_races = args.max_races if args.max_races > 0 else None
     use_efficient = args.efficient
+    reset_progress = args.reset_progress
     
     print(f"Starting race data collection for {year}")
     
@@ -831,6 +882,42 @@ def main():
         print(f"Targeting all race places")
     
     print(f"Settings: batch_size={batch_size}, pause={pause_time}s, max_races={max_races or 'unlimited'}, efficient_mode={use_efficient}")
+    
+    # 進捗ファイルのリセット
+    if reset_progress and places:
+        progress_file = f"{OUTPUT_DIR}/race_scraping_progress_{year}.txt"
+        if os.path.exists(progress_file):
+            # 進捗ファイルをバックアップ
+            backup_file = f"{progress_file}.bak"
+            try:
+                os.rename(progress_file, backup_file)
+                print(f"Backed up existing progress file to {backup_file}")
+            except:
+                print(f"Failed to backup progress file {progress_file}")
+            
+            # 新しい進捗ファイルを作成 (他の場所は保持)
+            try:
+                with open(backup_file, 'r') as f_in:
+                    lines = f_in.readlines()
+                
+                # 指定した場所以外のエントリを保持
+                year_str = str(year)
+                filtered_lines = []
+                for line in lines:
+                    race_id = line.strip()
+                    place_code = race_id[4:6] if len(race_id) >= 6 else ""
+                    # 指定された場所のエントリをスキップ
+                    if place_code not in places:
+                        filtered_lines.append(line)
+                
+                with open(progress_file, 'w') as f_out:
+                    f_out.writelines(filtered_lines)
+                
+                print(f"Reset progress for places: {', '.join(places)}")
+            except Exception as e:
+                print(f"Error resetting progress: {str(e)}")
+        else:
+            print("No progress file found to reset")
     
     # レースデータ収集（効率的な方法のみサポート）
     races_df, race_detailed_infos, horse_ids = scrape_races_by_id_pattern_efficient(
