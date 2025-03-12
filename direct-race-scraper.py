@@ -71,23 +71,68 @@ PLACE_DICT = {
     '09': '阪神', '10': '小倉'
 }
 
-# 効率的なレースIDの生成と検証
-def generate_race_ids_efficient(year, places=None):
+# レースの有効性をより厳格にチェック
+def is_valid_race(race_id, session=None):
     """
-    効率的にレースIDを生成する関数。
+    レースIDが有効かどうかをチェックする
+    
+    Args:
+        race_id: チェックするレースID
+        session: リクエストセッション
+    
+    Returns:
+        bool: レースが存在する場合はTrue
+    """
+    if session is None:
+        session = create_session()
+    
+    url = f"https://db.netkeiba.com/race/{race_id}"
+    
+    try:
+        # GETリクエストで確実に取得
+        response = session.get(url)
+        html_content = response.content.decode("euc-jp", "ignore")
+        
+        # レースが存在しない場合のメッセージをチェック
+        if "レース情報がありません" in html_content or "存在しないレースID" in html_content:
+            return False
+            
+        # レース結果テーブルの存在を確認（より厳密なチェック）
+        soup = BeautifulSoup(html_content, 'html.parser')
+        race_table = soup.select_one('table.race_table_01')
+        
+        # 有効なレースには常にテーブルが存在する
+        if not race_table:
+            return False
+        
+        # テーブルの中身が空でないことを確認
+        rows = race_table.find_all('tr')
+        if len(rows) <= 1:  # ヘッダー行のみの場合
+            return False
+            
+        return True
+    except Exception as e:
+        logger.error(f"Error checking race {race_id}: {str(e)}")
+        return False
+
+# 効率的なレースIDの生成と検証
+def generate_race_ids_efficiently(year, places=None):
+    """
+    効率的にレースIDを生成して処理する関数
     以下のルールに基づいて最適化:
     1. ある開催回の開催1日目の1Rがない → その競馬場での残りの開催回も全てないとみなす
-    2. ある開催日の1Rがない → 次の開催回にスキップ
+    2. ある開催日の1Rがない → 次の開催回の開催1日目へスキップ
     3. あるレースがない → その日の残りのレースも全てないとみなす
     
     Args:
         year: 対象年
         places: 対象競馬場コードのリスト（Noneの場合はすべての競馬場）
     
-    Yields:
-        str: レースID
+    Returns:
+        list: 処理すべき有効なレースIDのリスト
     """
     year_str = str(year)
+    valid_race_ids = []
     
     if places is None:
         places = list(PLACE_DICT.keys())  # すべての競馬場
@@ -110,13 +155,12 @@ def generate_race_ids_efficient(year, places=None):
             if not is_valid_race(first_day_first_race, session):
                 logger.info(f"First race of meeting {kai} at {place_name} not found")
                 # 重要: この開催回が存在しない場合、以降の開催回も全て存在しないとみなす
-                # (例: 5回目がないなら6回目もないと判断)
                 logger.info(f"No more meetings at {place_name} for this year")
                 break  # この競馬場でのループを終了
             
             # 開催1日目の1Rが存在する場合、その日のレースを全て処理
             logger.info(f"First race of meeting {kai} day 1 found, processing meeting {kai}")
-            yield first_day_first_race
+            valid_race_ids.append(first_day_first_race)
             
             # 開催1日目の2R～12Rを処理
             for race_num in range(2, 13):
@@ -125,7 +169,7 @@ def generate_race_ids_efficient(year, places=None):
                 if not is_valid_race(race_id, session):
                     logger.info(f"Race {race_num} of day 1 in meeting {kai} not found, skipping to next day")
                     break  # 同じ日の次のレースへのループを終了し、次の日へ
-                yield race_id
+                valid_race_ids.append(race_id)
             
             # 開催2日目～12日目を処理
             for day in range(2, 13):
@@ -135,11 +179,11 @@ def generate_race_ids_efficient(year, places=None):
                 # 開催日の1Rが存在するか確認
                 if not is_valid_race(first_race_of_day, session):
                     logger.info(f"First race of day {day} in meeting {kai} not found, skipping to next meeting")
-                    break  # 次の開催回へスキップ
+                    break  # 次の開催回へスキップ（重要な修正点）
                 
                 # 開催日の1Rが存在する場合、その日のレースを全て処理
                 logger.info(f"First race of day {day} in meeting {kai} found, processing all races for this day")
-                yield first_race_of_day
+                valid_race_ids.append(first_race_of_day)
                 
                 # 2R～12Rを処理
                 for race_num in range(2, 13):
@@ -148,52 +192,10 @@ def generate_race_ids_efficient(year, places=None):
                     if not is_valid_race(race_id, session):
                         logger.info(f"Race {race_num} of day {day} in meeting {kai} not found, skipping to next day")
                         break  # 同じ日の次のレースへのループを終了し、次の日へ
-                    yield race_id
-
-# レースの有効性をチェック
-def is_valid_race(race_id, session=None):
-    """
-    レースIDが有効かどうかをチェックする
-    
-    Args:
-        race_id: チェックするレースID
-        session: リクエストセッション
-    
-    Returns:
-        bool: レースが存在する場合はTrue
-    """
-    if session is None:
-        session = create_session()
-    
-    url = f"https://db.netkeiba.com/race/{race_id}"
-    
-    try:
-        # HEADリクエストで存在確認（高速）
-        response = session.head(url, allow_redirects=False)
-        
-        # ステータスコード200はページが存在することを示す
-        if response.status_code == 200:
-            return True
-        
-        # 念のためGETリクエストで詳細確認
-        if response.status_code in [301, 302]:
-            response = session.get(url)
-            html_content = response.content.decode("euc-jp", "ignore")
-            
-            # レースが存在しない場合のメッセージをチェック
-            if "レース情報がありません" in html_content or "存在しないレースID" in html_content:
-                return False
-                
-            # レース結果テーブルの存在を確認
-            soup = BeautifulSoup(html_content, 'html.parser')
-            race_table = soup.select_one('table.race_table_01')
-            
-            return race_table is not None
-            
-        return False
-    except Exception as e:
-        logger.error(f"Error checking race {race_id}: {str(e)}")
-        return False
+                    valid_race_ids.append(race_id)
+                    
+    logger.info(f"Generated {len(valid_race_ids)} valid race IDs to process")
+    return valid_race_ids
 
 # レース結果ページをスクレイピング
 def scrape_race_results(race_id, session=None):
@@ -703,8 +705,11 @@ def scrape_races_by_id_pattern_efficient(year, places=None, max_races=None, batc
     # 結果の中間保存用タイムスタンプ
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
-    # レースID生成関数から順次レースIDを取得
-    for race_id in generate_race_ids_efficient(year, places):
+    # 有効なレースIDをまとめて取得
+    valid_race_ids = generate_race_ids_efficiently(year, places)
+    
+    # 各レースIDを順に処理
+    for race_id in valid_race_ids:
         # 既に処理済みのレースはスキップ
         if race_id in skip_ids:
             logger.debug(f"Skipping already processed race: {race_id}")
@@ -716,16 +721,8 @@ def scrape_races_by_id_pattern_efficient(year, places=None, max_races=None, batc
         if processed_count > 1 and processed_count % 10 == 0:
             time.sleep(random.uniform(3, 7))
         
-        # レースIDから情報抽出
-        place_code = race_id[4:6]
-        kai = int(race_id[6:8])
-        day = int(race_id[8:10])
-        race_num = int(race_id[10:12])
-        
         # レース結果を取得
         logger.info(f"Processing valid race: {race_id}")
-        
-        # レース結果を取得
         result, race_info = scrape_race_results(race_id, session=session)
         
         # 有効なレースデータが取得できた場合のみカウントアップ
