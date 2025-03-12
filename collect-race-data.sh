@@ -12,6 +12,7 @@ KEEP_INTERMEDIATE=1        # 保持する中間結果ファイル数（各タイ
 CLEANUP_INTERMEDIATE=true  # 最終結果が得られた後に中間ファイルを削除するか
 COLLECT_HORSES=true        # 馬情報を収集するかどうか
 SKIP_EXISTING_HORSES=true  # 既存の馬情報をスキップするかどうか
+RESET_PROGRESS=false       # 進捗ファイルをリセットするか
 
 # 使い方の表示
 function show_usage {
@@ -29,11 +30,13 @@ function show_usage {
     echo "      --horses-only     レースデータをスキップし、馬情報のみを収集"
     echo "      --no-skip-horses  既存の馬情報もスキップせずに再取得する"
     echo "      --collect-all-horses 既存の馬情報も含めてすべて取得する (--no-skip-horsesの別名)"
+    echo "      --reset-progress  進捗ファイルをリセットして対象競馬場のデータを再収集"
     echo "  -h, --help            このヘルプを表示"
     echo ""
     echo "例: $0 --year 2023 --max 500 --batch 3 --pause 45 --keep 2"
     echo "例: $0 --year 2023 --max 500 --no-horses"
     echo "例: $0 --year 2023 --horses-only --no-skip-horses"
+    echo "例: $0 --year 2023 --reset-progress"
     exit 1
 }
 
@@ -82,6 +85,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-skip-horses|--collect-all-horses)
             SKIP_EXISTING_HORSES=false
+            shift
+            ;;
+        --reset-progress)
+            RESET_PROGRESS=true
             shift
             ;;
         -h|--help)
@@ -161,6 +168,7 @@ echo "  バッチ間待機時間: $PAUSE_SECONDS秒"
 echo "  レースデータ収集: $([ "$COLLECT_RACES" = true ] && echo "有効" || echo "無効")"
 echo "  馬情報収集: $([ "$COLLECT_HORSES" = true ] && echo "有効" || echo "無効")"
 echo "  既存馬情報のスキップ: $([ "$SKIP_EXISTING_HORSES" = true ] && echo "有効" || echo "無効")"
+echo "  進捗リセット: $([ "$RESET_PROGRESS" = true ] && echo "有効" || echo "無効")"
 echo "======================================================================="
 
 # ファイル名の確認と表示
@@ -192,12 +200,19 @@ if [ "$COLLECT_RACES" = true ]; then
     PLACE_CODES=("01" "02" "03" "04" "05" "06" "07" "08" "09" "10")
     PLACE_NAMES=("札幌" "函館" "福島" "新潟" "東京" "中山" "中京" "京都" "阪神" "小倉")
 
+    # 進捗リセットオプションの設定
+    RESET_OPTION=""
+    if [ "$RESET_PROGRESS" = true ]; then
+        RESET_OPTION="--reset_progress"
+        echo "注意: 進捗ファイルをリセットして競馬場ごとにデータを再収集します"
+    fi
+
     for i in "${!PLACE_CODES[@]}"; do
         PLACE_CODE=${PLACE_CODES[$i]}
         PLACE_NAME=${PLACE_NAMES[$i]}
         
         echo "[TASK 1-${i}] ${TARGET_YEAR}年 ${PLACE_NAME}(${PLACE_CODE})競馬場のレースデータを収集 (開始: $(date))"
-        python $RACE_SCRAPER --year $TARGET_YEAR --places $PLACE_CODE --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --max_races $MAX_RACES --efficient > scraping_logs/races_${PLACE_CODE}_${TIMESTAMP}.log 2>&1
+        python $RACE_SCRAPER --year $TARGET_YEAR --places $PLACE_CODE --batch_size $BATCH_SIZE --pause $PAUSE_SECONDS --max_races $MAX_RACES --efficient $RESET_OPTION > scraping_logs/races_${PLACE_CODE}_${TIMESTAMP}.log 2>&1
         
         # 中間ファイルのクリーンアップ
         cleanup_intermediate_files "intermediate_races_*" $KEEP_INTERMEDIATE "$OUTPUT_DIR"
