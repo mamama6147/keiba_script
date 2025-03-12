@@ -102,34 +102,14 @@ def generate_race_ids_efficient(year, places=None):
                 for race_num in range(1, 13):
                     race_id = f"{year_str}{place_code}{str(kai).zfill(2)}{str(kaisai_day).zfill(2)}{str(race_num).zfill(2)}"
                     
-                    # skip_pattern = False = 通常のレースID
-                    # skip_pattern = True = この後のパターンをスキップするためのシグナル
-                    if race_num == 1:
-                        # 1Rは常にチェックして開催日の存在を確認
-                        yield False, race_id
-                    else:
-                        # 2R以降は1Rが存在した場合のみチェック
-                        if day_exists:
-                            yield False, race_id
-                        else:
-                            # 1Rがなければ、この日のレースはスキップ
-                            break
-                
-                # 開催日が存在した場合フラグを立てる（次の開催日に進む）
-                if day_exists:
-                    kai_exists = True
-                elif race_num == 1:
-                    # 1Rが処理されたが開催日が存在しない場合、次の開催日に進む
-                    logger.info(f"Day {kaisai_day} in meeting {kai} at {place_name} not found, skipping to next day")
-                    continue
-                else:
-                    # 開催日が存在しない場合、次の開催日をチェックするシグナルを送る
-                    yield True, race_id
+                    # 全てのレースIDを通常通り生成してチェックする
+                    yield False, race_id
+                    
+                # 開催日の有効性は scrape_races_by_id_pattern_efficient 関数内で判断されるので、
+                # ここではパターンチェックをせず、次の日に単純に進む
             
-            # 開催回が存在しない場合、次の開催回をスキップするシグナルを送る
-            if not kai_exists:
-                logger.info(f"Meeting {kai} at {place_name} not found, skipping to next meeting")
-                # 既にスキップシグナルを送っているので、ここでは何もしない
+            # 同様に開催回についても、scrape_races_by_id_pattern_efficient 関数内で判断される
+            # ここでは単純にループを続行する
 
 # レースの有効性をチェック
 def is_valid_race(race_id, session=None):
@@ -684,8 +664,8 @@ def scrape_races_by_id_pattern_efficient(year, places=None, max_races=None, batc
     # 結果の中間保存用タイムスタンプ
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
-    # 有効チェック用のフラグ
-    current_day_valid = False
+    # 日付の追跡用の辞書
+    valid_races = {}  # {place_code: {kai: {day: set(race_nums)}}}
     
     for skip_pattern, race_id in generate_race_ids_efficient(year, places):
         # スキップシグナルを受け取った場合、特に何もしない（効率化のため）
@@ -709,24 +689,42 @@ def scrape_races_by_id_pattern_efficient(year, places=None, max_races=None, batc
         day = int(race_id[8:10])
         race_num = int(race_id[10:12])
         
+        # 既に処理したレースパターンであればスキップ
+        if place_code in valid_races and kai in valid_races[place_code] and day in valid_races[place_code][kai]:
+            # 1レース目以外で、かつ1レース目が有効でない場合はスキップ
+            if race_num > 1 and 1 not in valid_races[place_code][kai][day]:
+                logger.debug(f"Skipping race {race_id} as day {day} of meeting {kai} at place {place_code} has no race 1")
+                # 進捗ファイルに記録
+                with open(progress_file, 'a') as f:
+                    f.write(f"{race_id}\n")
+                continue
+        
         # レースの有効性をチェック
         is_valid = is_valid_race(race_id, session)
         
+        # データ構造を初期化
+        if place_code not in valid_races:
+            valid_races[place_code] = {}
+        if kai not in valid_races[place_code]:
+            valid_races[place_code][kai] = {}
+        if day not in valid_races[place_code][kai]:
+            valid_races[place_code][kai][day] = set()
+        
         # 無効なレースは処理しない
         if not is_valid:
-            # 1Rが無効な場合は、その日のレースが存在しないことを示す
-            if race_num == 1:
-                logger.info(f"Race {race_id} (day {day}, meeting {kai}) not found, skipping this day")
-                current_day_valid = False
-            
             # 進捗ファイルに記録
             with open(progress_file, 'a') as f:
                 f.write(f"{race_id}\n")
+            # レース1が無効な場合、その日のレースが存在しないことをログに記録
+            if race_num == 1:
+                logger.info(f"Race {race_id} (day {day}, meeting {kai}) not found, skipping this day")
             continue
         
-        # 1Rが有効な場合、その日のレースが存在することを記録
+        # 有効なレースを記録
+        valid_races[place_code][kai][day].add(race_num)
+        
+        # レース1が見つかった場合はログに記録
         if race_num == 1:
-            current_day_valid = True
             logger.info(f"Race {race_id} found, processing day {day} of meeting {kai}")
         
         # レース結果を取得
@@ -830,7 +828,7 @@ def main():
     
     # 競馬場が指定されている場合
     if places:
-        place_names = [f"{p}({PLACE_DICT.get(p, 'Unknown')})" for p in places]
+        place_names = [f"{p}({PLACE_DICT.get(p, 'Unknown')})"] for p in places]
         print(f"Targeting race places: {', '.join(place_names)}")
     else:
         print(f"Targeting all race places")
