@@ -77,8 +77,8 @@ def generate_race_ids_efficient(year, places=None):
     効率的にレースIDを生成する関数。
     以下のルールに基づいて最適化:
     1. ある開催回の開催1日目の1Rがない → その競馬場での残りの開催回も全てないとみなす
-    2. ある開催回のある開催日の1Rがない → その開催日のレースは全てないとみなす
-    3. レースは必ず連続している (4Rがないのに5Rがあることはない)
+    2. ある開催日の1Rがない → 次の開催回にスキップ
+    3. あるレースがない → その日の残りのレースも全てないとみなす
     
     Args:
         year: 対象年
@@ -121,12 +121,10 @@ def generate_race_ids_efficient(year, places=None):
             # 開催1日目の2R～12Rを処理
             for race_num in range(2, 13):
                 race_id = f"{year_str}{place_code}{str(kai).zfill(2)}01{str(race_num).zfill(2)}"
-                # レースの有効性はscrape_races_by_id_pattern_efficient関数内で処理
-                # 重要: あるレースが存在しない場合、それ以降のレースも存在しないとみなす
-                # (例: 4Rがないなら5R以降もないと判断)
+                # レースの有効性をチェック
                 if not is_valid_race(race_id, session):
                     logger.info(f"Race {race_num} of day 1 in meeting {kai} not found, skipping to next day")
-                    break
+                    break  # 同じ日の次のレースへのループを終了し、次の日へ
                 yield race_id
             
             # 開催2日目～12日目を処理
@@ -136,8 +134,8 @@ def generate_race_ids_efficient(year, places=None):
                 
                 # 開催日の1Rが存在するか確認
                 if not is_valid_race(first_race_of_day, session):
-                    logger.info(f"First race of day {day} in meeting {kai} not found, skipping to next day")
-                    continue  # 次の開催日へスキップ
+                    logger.info(f"First race of day {day} in meeting {kai} not found, skipping to next meeting")
+                    break  # 次の開催回へスキップ
                 
                 # 開催日の1Rが存在する場合、その日のレースを全て処理
                 logger.info(f"First race of day {day} in meeting {kai} found, processing all races for this day")
@@ -146,7 +144,7 @@ def generate_race_ids_efficient(year, places=None):
                 # 2R～12Rを処理
                 for race_num in range(2, 13):
                     race_id = f"{year_str}{place_code}{str(kai).zfill(2)}{str(day).zfill(2)}{str(race_num).zfill(2)}"
-                    # レースの有効性はscrape_races_by_id_pattern_efficient関数内で処理
+                    # レースの有効性をチェック
                     if not is_valid_race(race_id, session):
                         logger.info(f"Race {race_num} of day {day} in meeting {kai} not found, skipping to next day")
                         break  # 同じ日の次のレースへのループを終了し、次の日へ
