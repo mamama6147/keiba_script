@@ -13,6 +13,7 @@ CLEANUP_INTERMEDIATE=true  # 最終結果が得られた後に中間ファイル
 COLLECT_HORSES=true        # 馬情報を収集するかどうか
 SKIP_EXISTING_HORSES=true  # 既存の馬情報をスキップするかどうか
 RESET_PROGRESS=false       # 進捗ファイルをリセットするか
+ORGANIZE_FILES=true        # 処理完了後にファイルを年別フォルダに整理するか
 
 # 使い方の表示
 function show_usage {
@@ -31,6 +32,7 @@ function show_usage {
     echo "      --no-skip-horses  既存の馬情報もスキップせずに再取得する"
     echo "      --collect-all-horses 既存の馬情報も含めてすべて取得する (--no-skip-horsesの別名)"
     echo "      --reset-progress  進捗ファイルをリセットして対象競馬場のデータを再収集"
+    echo "      --no-organize     処理完了後にファイルを年別フォルダに整理しない"
     echo "  -h, --help            このヘルプを表示"
     echo ""
     echo "例: $0 --year 2023 --max 500 --batch 3 --pause 45 --keep 2"
@@ -89,6 +91,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --reset-progress)
             RESET_PROGRESS=true
+            shift
+            ;;
+        --no-organize)
+            ORGANIZE_FILES=false
             shift
             ;;
         -h|--help)
@@ -155,6 +161,76 @@ cleanup_intermediate_files() {
     fi
 }
 
+# ファイル整理関数：指定年のファイルを年別ディレクトリに移動
+organize_files_by_year() {
+    local year=$1
+    local year_dir="${year}"
+    
+    echo "======================================================================="
+    echo "  ${year}年のファイルを整理しています..."
+    echo "======================================================================="
+    
+    # 年別ディレクトリを作成
+    mkdir -p "${year_dir}"
+    mkdir -p "${year_dir}/keiba_data"
+    mkdir -p "${year_dir}/horse_data"
+    mkdir -p "${year_dir}/scraping_logs"
+    mkdir -p "${year_dir}/keiba_data/debug_html"
+    mkdir -p "${year_dir}/horse_data/debug_html"
+    
+    # レースデータ関連ファイルの移動
+    echo "レースデータ関連ファイルを移動中..."
+    mv keiba_data/races_${year}_*.csv "${year_dir}/keiba_data/" 2>/dev/null
+    mv keiba_data/race_infos_${year}_*.json "${year_dir}/keiba_data/" 2>/dev/null
+    mv keiba_data/horse_ids_${year}_*.json "${year_dir}/keiba_data/" 2>/dev/null
+    
+    # 馬情報関連ファイルの移動（該当年のものを特定するのが難しいため、タイムスタンプで判断）
+    if [ "$COLLECT_HORSES" = true ]; then
+        echo "馬情報関連ファイルを移動中..."
+        # タイムスタンプを基に当日作成された馬情報ファイルを移動
+        find horse_data -name "horse_info_*.csv" -type f -mtime -1 -exec mv {} "${year_dir}/horse_data/" \;
+        find horse_data -name "horse_pedigree_*.csv" -type f -mtime -1 -exec mv {} "${year_dir}/horse_data/" \;
+    fi
+    
+    # ログファイルの移動
+    echo "ログファイルを移動中..."
+    mv scraping_logs/races_*_${TIMESTAMP}.log "${year_dir}/scraping_logs/" 2>/dev/null
+    
+    if [ "$COLLECT_HORSES" = true ]; then
+        mv scraping_logs/race_horses_${TIMESTAMP}.log "${year_dir}/scraping_logs/" 2>/dev/null
+        mv scraping_logs/active_horses_${TIMESTAMP}.log "${year_dir}/scraping_logs/" 2>/dev/null
+    fi
+    
+    # デバッグHTMLファイルの移動（タイムスタンプで判断）
+    echo "デバッグファイルを移動中..."
+    find keiba_data/debug_html -name "race_*.html" -type f -mtime -1 -exec mv {} "${year_dir}/keiba_data/debug_html/" \;
+    
+    if [ "$COLLECT_HORSES" = true ]; then
+        find horse_data/debug_html -name "horse_*.html" -type f -mtime -1 -exec mv {} "${year_dir}/horse_data/debug_html/" \;
+    fi
+    
+    # 進捗ファイルも移動（バックアップとして）
+    if [ -f "${OUTPUT_DIR}/race_scraping_progress_${year}.txt" ]; then
+        cp "${OUTPUT_DIR}/race_scraping_progress_${year}.txt" "${year_dir}/keiba_data/"
+    fi
+    
+    # 移動結果の報告
+    echo "ファイル整理完了："
+    echo "- レースデータ: $(find ${year_dir}/keiba_data -maxdepth 1 -name "races_*.csv" | wc -l) ファイル"
+    echo "- レース情報: $(find ${year_dir}/keiba_data -maxdepth 1 -name "race_infos_*.json" | wc -l) ファイル"
+    echo "- 馬ID: $(find ${year_dir}/keiba_data -maxdepth 1 -name "horse_ids_*.json" | wc -l) ファイル"
+    echo "- ログファイル: $(find ${year_dir}/scraping_logs -type f | wc -l) ファイル"
+    
+    if [ "$COLLECT_HORSES" = true ]; then
+        echo "- 馬情報: $(find ${year_dir}/horse_data -maxdepth 1 -name "horse_info_*.csv" | wc -l) ファイル"
+        echo "- 血統情報: $(find ${year_dir}/horse_data -maxdepth 1 -name "horse_pedigree_*.csv" | wc -l) ファイル"
+    fi
+    
+    echo "======================================================================="
+    echo "  ${year}年のデータを ${year_dir}/ ディレクトリに整理しました"
+    echo "======================================================================="
+}
+
 # 現在の日時を取得（ファイル名に使用）
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 
@@ -169,6 +245,7 @@ echo "  レースデータ収集: $([ "$COLLECT_RACES" = true ] && echo "有効"
 echo "  馬情報収集: $([ "$COLLECT_HORSES" = true ] && echo "有効" || echo "無効")"
 echo "  既存馬情報のスキップ: $([ "$SKIP_EXISTING_HORSES" = true ] && echo "有効" || echo "無効")"
 echo "  進捗リセット: $([ "$RESET_PROGRESS" = true ] && echo "有効" || echo "無効")"
+echo "  ファイル整理: $([ "$ORGANIZE_FILES" = true ] && echo "有効" || echo "無効")"
 echo "======================================================================="
 
 # ファイル名の確認と表示
@@ -373,6 +450,11 @@ if [ "$CLEANUP_INTERMEDIATE" = true ]; then
     cleanup_intermediate_files "intermediate_horse_training_*" 0 "horse_data"
     
     echo "中間ファイルのクリーンアップが完了しました。"
+fi
+
+# 処理完了後に年別フォルダにファイルを整理
+if [ "$ORGANIZE_FILES" = true ]; then
+    organize_files_by_year $TARGET_YEAR
 fi
 
 echo "======================================================================="
