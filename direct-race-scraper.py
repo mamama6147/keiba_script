@@ -708,6 +708,10 @@ def scrape_races_by_id_pattern_efficient(year, places=None, max_races=None, batc
     # 有効なレースIDをまとめて取得
     valid_race_ids = generate_race_ids_efficiently(year, places)
     
+    if not valid_race_ids:
+        logger.warning(f"No valid race IDs generated for {year} with places: {places}")
+        return None, [], []
+    
     # 各レースIDを順に処理
     for race_id in valid_race_ids:
         # 既に処理済みのレースはスキップ
@@ -836,7 +840,7 @@ def main():
     # 結果の保存
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
-    if races_df is not None:
+    if races_df is not None and not races_df.empty:
         # 結果のファイル名を作成
         filename = f"races_{year}_{timestamp}.csv"
         
